@@ -45,13 +45,35 @@ func (a *Auth) ValidateToken(ctx context.Context, token string) (authctx.Princip
 		return authctx.Principal{}, fmt.Errorf("clients: %s", resp.GetReason())
 	}
 
-	user := resp.GetUser()
-	return authctx.Principal{
-		UserID:    user.GetId(),
-		Role:      user.GetRole(),
-		CompanyID: user.GetCompanyId(),
-		ParentID:  user.GetParentId(),
-	}, nil
+	return principalFrom(resp.GetUser()), nil
+}
+
+// principalFrom maps the authentication service's user into a principal.
+//
+// The per-product access map is copied wholesale: this service resolves its own
+// product through authctx, and flattening here would discard the other
+// product's access from a token that legitimately carries both.
+func principalFrom(user *authv1.User) authctx.Principal {
+	p := authctx.Principal{
+		UserID:          user.GetId(),
+		CompanyID:       user.GetCompanyId(),
+		ParentID:        user.GetParentId(),
+		IsPlatformStaff: user.GetIsPlatformStaff(),
+		FMSTenantID:     user.GetFmsTenantId(),
+	}
+
+	if access := user.GetAccess(); len(access) > 0 {
+		p.Access = make(map[authctx.Product]authctx.ProductAccess, len(access))
+		for product, a := range access {
+			p.Access[authctx.Product(product)] = authctx.ProductAccess{
+				Role:        a.GetRole(),
+				Permissions: a.GetPermissions(),
+				Features:    a.GetFeatures(),
+			}
+		}
+	}
+
+	return p
 }
 
 // Target is one resolved recipient's addresses.

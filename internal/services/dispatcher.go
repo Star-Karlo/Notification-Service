@@ -13,6 +13,7 @@ import (
 	"github.com/karlo/notification-service/internal/clients"
 	"github.com/karlo/notification-service/internal/config"
 	"github.com/karlo/notification-service/internal/models"
+	"github.com/karlo/notification-service/internal/platform/cache"
 	notificationv1 "github.com/karlo/notification-service/internal/platform/genproto/karlo/notification/v1"
 	"github.com/karlo/notification-service/internal/platform/query"
 	"github.com/karlo/notification-service/internal/repository"
@@ -37,6 +38,7 @@ type Dispatcher struct {
 	push          channels.Sender
 	email         *channels.Email
 	whatsapp      channels.Sender
+	cache         cache.Cache
 	cfg           *config.Config
 }
 
@@ -46,6 +48,7 @@ func NewDispatcher(
 	push channels.Sender,
 	email *channels.Email,
 	whatsapp channels.Sender,
+	c cache.Cache,
 	cfg *config.Config,
 ) *Dispatcher {
 	return &Dispatcher{
@@ -54,6 +57,7 @@ func NewDispatcher(
 		push:          push,
 		email:         email,
 		whatsapp:      whatsapp,
+		cache:         c,
 		cfg:           cfg,
 	}
 }
@@ -89,15 +93,14 @@ type ChannelResult struct {
 func (d *Dispatcher) Notify(ctx context.Context, req NotifyRequest) (*NotifyResult, error) {
 	// A repeat within the dedupe window returns the original rather than
 	// notifying twice. Business services retry freely, so this matters.
+	//
+	// Redis answers first with SET NX: one round trip that both checks and
+	// claims, so two concurrent retries cannot both decide they are the
+	// original. The Mongo lookup behind it is a read-then-act with a window
+	// between the two, and it touches the collection on every single send.
 	if req.IdempotencyKey != "" {
-		existing, err := d.notifications.FindByIdempotencyKey(ctx, req.IdempotencyKey)
-		if err != nil {
-			slog.Warn("idempotency lookup failed, proceeding", "error", err)
-		} else if len(existing) > 0 {
-			return &NotifyResult{
-				NotificationID: existing[0].ID.Hex(),
-				Deduplicated:   true,
-			}, nil
+		if deduped, id := d.alreadySent(ctx, req.IdempotencyKey); deduped {
+			return &NotifyResult{NotificationID: id, Deduplicated: true}, nil
 		}
 	}
 
@@ -132,8 +135,57 @@ func (d *Dispatcher) Notify(ctx context.Context, req NotifyRequest) (*NotifyResu
 	out := &NotifyResult{Results: results}
 	if len(docs) > 0 {
 		out.NotificationID = docs[0].ID.Hex()
+		// Fill in the claim so a later retry can report the original id rather
+		// than an empty one.
+		if req.IdempotencyKey != "" {
+			d.cache.Set(ctx,
+				cache.Key("notification", "idem", cache.Fingerprint(req.IdempotencyKey)),
+				[]byte(out.NotificationID), d.cfg.DedupeWindow)
+		}
 	}
 	return out, nil
+}
+
+// alreadySent reports whether this key has been handled, claiming it if not.
+//
+// The claim is written before delivery, not after. Claiming afterwards would
+// leave a window in which a retry arriving mid-send sees no claim and delivers
+// a second time — which is exactly the case retries produce.
+func (d *Dispatcher) alreadySent(ctx context.Context, key string) (bool, string) {
+	cacheKey := cache.Key("notification", "idem", cache.Fingerprint(key))
+
+	won, err := d.cache.SetIfAbsent(ctx, cacheKey, []byte("pending"), d.cfg.DedupeWindow)
+	switch {
+	case err == nil && won:
+		// First time through; nothing more to check.
+		return false, ""
+	case err == nil && !won:
+		if id, ok := d.cache.Get(ctx, cacheKey); ok && string(id) != "pending" {
+			return true, string(id)
+		}
+		// Another send holds the claim but has not finished. Treat it as a
+		// duplicate: delivering alongside it is the one outcome the key exists
+		// to prevent.
+		return true, ""
+	}
+
+	// No cache, or Redis is unreachable. Fall back to the durable record, which
+	// is slower and racier but still catches the common retry.
+	if !errors.Is(err, cache.ErrNoCache) {
+		slog.Warn("idempotency check fell back to the database", "error", err)
+	}
+
+	existing, dbErr := d.notifications.FindByIdempotencyKey(ctx, key)
+	if dbErr != nil {
+		// Neither source could answer. Proceed: a possible duplicate
+		// notification is a smaller failure than a lost one.
+		slog.Warn("idempotency could not be established; proceeding", "error", dbErr)
+		return false, ""
+	}
+	if len(existing) > 0 {
+		return true, existing[0].ID.Hex()
+	}
+	return false, ""
 }
 
 // resolveAudience expands an audience into concrete recipients.

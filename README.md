@@ -36,6 +36,20 @@ indistinguishable from one nobody raised.
 Delivery never fails the RPC: an order that was approved has been approved,
 whether or not the push went out.
 
+## Retries are safe
+
+A caller may pass an `IdempotencyKey`. The claim is written to Redis with
+`SET NX` **before** delivery, not after: claiming afterwards leaves a window in
+which a retry arriving mid-send sees no claim and delivers a second time, which
+is exactly the case retries produce. The sparse-unique `idempotencyKey` on the
+notification document is the durable backstop.
+
+When Redis is absent the claim falls back to the Mongo lookup, and if that also
+fails **the notification is sent**. A duplicate notification is an annoyance; a
+dropped one may mean a driver never learns they were assigned a job. That is the
+opposite of how the login rate limiter degrades, and both choices are written
+down in `../docs/CACHING.md` §5 so nobody changes one to match the other.
+
 ## Also guarded against the legacy database
 
 Same two defences as the master data service, with an `nt_` prefix. The legacy

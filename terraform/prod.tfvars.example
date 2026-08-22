@@ -1,0 +1,41 @@
+# Notification service, production.
+
+environment          = "prod"
+cors_allowed_origins = ["https://app.karlo.co.id"]
+fluentd_host         = "fluentd.karlo.internal"
+
+# Bursty rather than sustained: a bulk order import fans out to many
+# notifications at once, so the ceiling matters more than the baseline.
+task_cpu      = 256
+task_memory   = 512
+desired_count = 2
+min_capacity  = 2
+max_capacity  = 6
+
+extra_environment = [
+  { name = "MONGO_DATABASE", value = "karlo_notification" },
+  { name = "DELIVERY_WORKERS", value = "16" },
+  { name = "DEDUPE_WINDOW", value = "5m" },
+  { name = "OTP_TTL", value = "5m" },
+  { name = "OTP_MAX_ATTEMPTS", value = "5" },
+  { name = "OTP_RESEND_COOLDOWN", value = "60s" },
+]
+
+secrets = [
+  { name = "MONGO_URI", valueFrom = "SECRET_DOCDB:uri::" },
+  { name = "JWT_PUBLIC_KEY", valueFrom = "SECRET_JWT_PUBLIC" },
+  { name = "SERVICE_TOKEN", valueFrom = "SECRET_TOKENS:notification-service::" },
+  { name = "ACCEPTED_SERVICE_TOKENS", valueFrom = "SECRET_TOKENS:all::" },
+  # Delivery channels. Each is off until configured, and /health reports which
+  # are live.
+  { name = "FCM_CREDENTIALS_JSON", valueFrom = "SECRET_FCM" },
+  { name = "SMTP_PASSWORD", valueFrom = "SECRET_SMTP" },
+  { name = "WHATSAPP_TOKEN", valueFrom = "SECRET_WHATSAPP:token::" },
+  { name = "WHATSAPP_VERIFY_TOKEN", valueFrom = "SECRET_WHATSAPP:verify::" },
+]
+
+secret_arns = ["SECRET_DOCDB", "SECRET_JWT_PUBLIC", "SECRET_TOKENS", "SECRET_FCM", "SECRET_SMTP", "SECRET_WHATSAPP"]
+
+# The SECRET_* placeholders are Secrets Manager ARNs from platform-terraform's
+# `secret_arns` output. Copy this file to prod.tfvars and substitute them; the
+# copy is gitignored because the ARNs name where production credentials live.

@@ -17,6 +17,7 @@ import (
 	"github.com/karlo/notification-service/internal/grpcserver"
 	"github.com/karlo/notification-service/internal/handlers"
 	"github.com/karlo/notification-service/internal/platform/authctx"
+	"github.com/karlo/notification-service/internal/platform/cache"
 	notificationv1 "github.com/karlo/notification-service/internal/platform/genproto/karlo/notification/v1"
 	"github.com/karlo/notification-service/internal/platform/grpcutil"
 	"github.com/karlo/notification-service/internal/platform/logger"
@@ -57,6 +58,10 @@ func run() error {
 	// Logs go to stdout as JSON, and additionally to Fluentd when
 	// FLUENTD_HOST is set. An unreachable collector degrades to
 	// stdout-only rather than stopping the service.
+	// This service belongs to TMS; authctx resolves HasModule, Role and
+	// HasRole against it.
+	authctx.SetProduct(authctx.ProductTMS)
+
 	logger.InitFromEnv("notification")
 	defer logger.Close()
 
@@ -106,11 +111,20 @@ func run() error {
 	emailSender := channels.NewEmail(cfg.Email)
 	whatsappSender := channels.NewWhatsApp(cfg.WhatsApp)
 
+	// Optional. Without REDIS_ADDR this is a no-op and idempotency falls back
+	// to the durable record in MongoDB.
+	cacheClient := cache.FromEnv("notification")
+	defer func() {
+		if err := cacheClient.Close(); err != nil {
+			slog.Error("cache close failed", "error", err)
+		}
+	}()
+
 	notificationRepo := repository.NewNotificationRepository(db)
 	otpRepo := repository.NewOTPRepository(db)
 	inboundRepo := repository.NewInboundRepository(db)
 
-	dispatcher := services.NewDispatcher(notificationRepo, authClient, pushSender, emailSender, whatsappSender, cfg)
+	dispatcher := services.NewDispatcher(notificationRepo, authClient, pushSender, emailSender, whatsappSender, cacheClient, cfg)
 	otpService := services.NewOTPService(otpRepo, whatsappSender, cfg.OTP)
 
 	grpcSrv := grpcutil.NewServer(grpcutil.ServerConfig{
