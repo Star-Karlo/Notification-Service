@@ -21,6 +21,7 @@ import (
 	notificationv1 "github.com/karlo/notification-service/internal/platform/genproto/karlo/notification/v1"
 	"github.com/karlo/notification-service/internal/platform/grpcutil"
 	"github.com/karlo/notification-service/internal/platform/logger"
+	"github.com/karlo/notification-service/internal/platform/revocation"
 	"github.com/karlo/notification-service/internal/repository"
 	"github.com/karlo/notification-service/internal/routes"
 	"github.com/karlo/notification-service/internal/services"
@@ -139,13 +140,21 @@ func run() error {
 		grpcserver.New(dispatcher, otpService, emailSender),
 	)
 
+	// Revocations announced by the authentication service. Honoured locally,
+	// so a suspension or a permission change takes effect at once without
+	// putting authentication on the critical path of every request.
+	watchCtx, stopWatching := context.WithCancel(context.Background())
+	defer stopWatching()
+	revocationChecker, _ := revocation.FromEnv(watchCtx, "notification", tokenLifetimeHint())
+
 	router := routes.Setup(routes.Deps{
-		Config:   cfg,
-		Verifier: verifier,
-		Remote:   authClient,
-		Inbox:    handlers.NewInboxHandler(dispatcher),
-		OTP:      handlers.NewOTPHandler(otpService),
-		Webhook:  handlers.NewWebhookHandler(inboundRepo, cfg),
+		Config:      cfg,
+		Verifier:    verifier,
+		Remote:      authClient,
+		Revocations: revocationChecker,
+		Inbox:       handlers.NewInboxHandler(dispatcher),
+		OTP:         handlers.NewOTPHandler(otpService),
+		Webhook:     handlers.NewWebhookHandler(inboundRepo, cfg),
 	})
 
 	httpSrv := &http.Server{
@@ -199,3 +208,12 @@ func run() error {
 	slog.Info("stopped")
 	return nil
 }
+
+// tokenLifetimeHint is how long a revocation entry must be kept: at least as
+// long as the longest token that could still be in circulation.
+//
+// This service does not mint tokens and so cannot read the real setting. Two
+// hours matches the authentication service's default; erring long is the safe
+// direction, since an entry kept too long merely refuses a token that had
+// already expired.
+func tokenLifetimeHint() time.Duration { return 2 * time.Hour }

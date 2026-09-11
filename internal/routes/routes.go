@@ -24,6 +24,9 @@ type Deps struct {
 	Verifier *authctx.Verifier
 	Remote   authctx.RemoteValidator
 
+	// Revocations lets a locally-verified token be refused before it expires.
+	Revocations authctx.RevocationChecker
+
 	Inbox   *handlers.InboxHandler
 	OTP     *handlers.OTPHandler
 	Webhook *handlers.WebhookHandler
@@ -85,7 +88,7 @@ func Setup(d Deps) *gin.Engine {
 
 	// The inbox is per user and always scoped to the token.
 	notifications := api.Group("/notifications")
-	notifications.Use(authctx.RequireAuth(d.Verifier, d.Remote))
+	notifications.Use(authctx.RequireAuthWithRevocations(d.Verifier, d.Remote, d.Revocations))
 	notifications.GET("", d.Inbox.List)
 	notifications.GET("/unread", d.Inbox.Unread)
 	notifications.POST("/read", d.Inbox.MarkRead)
