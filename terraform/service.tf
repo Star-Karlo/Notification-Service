@@ -46,20 +46,27 @@ resource "aws_ecs_task_definition" "main" {
           { name = "BUSINESS_GRPC_ADDR", value = "business.karlo.internal:6003" },
           { name = "NOTIFICATION_GRPC_ADDR", value = "notification.karlo.internal:6004" },
 
-          { name = "REDIS_ADDR", value = "${local.platform.redis_endpoint}:6379" },
-          # ElastiCache has encryption in transit enabled, so the client must
-          # use TLS or every connection is refused.
-          { name = "REDIS_TLS", value = "true" },
+          # Empty when the platform runs no cache; the service then starts
+          # without one. ElastiCache enforces TLS, the in-cluster container
+          # does not speak it, so the flag follows the platform's choice.
+          { name = "REDIS_ADDR", value = local.platform.redis_endpoint == "" ? "" : "${local.platform.redis_endpoint}:6379" },
+          { name = "REDIS_TLS", value = tostring(try(local.platform.redis_tls, false)) },
 
           { name = "FLUENTD_HOST", value = var.fluentd_host },
           { name = "CORS_ALLOWED_ORIGINS", value = join(",", var.cors_allowed_origins) },
+          # Gin trusts X-Forwarded-For from any address unless told which
+          # proxies to believe: the VPC (the load balancer) and CloudFront's
+          # edges, which the platform computes. Empty (a platform state
+          # without the output yet) keeps Gin's default, so this is safe to
+          # apply in either order.
+          { name = "TRUSTED_PROXIES", value = try(local.platform.trusted_proxy_cidrs, "") },
         ],
         var.extra_environment,
       )
 
       # Secrets are injected by the ECS agent at start, so they never appear in
       # the task definition — which is readable by anyone with console access.
-      secrets = var.secrets
+      secrets = local.secrets
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -101,9 +108,9 @@ resource "aws_ecs_service" "main" {
     # Public subnets with a public IP remove the need for a NAT gateway. The
     # tasks are still not reachable: the security group admits traffic only
     # from the load balancer. See tasks_in_public_subnets in the platform.
-    subnets          = var.tasks_in_public_subnets ? local.platform.public_subnet_ids : local.platform.private_subnet_ids
+    subnets          = local.platform.tasks_in_public_subnets ? local.platform.public_subnet_ids : local.platform.private_subnet_ids
     security_groups  = [local.platform.tasks_security_group_id]
-    assign_public_ip = var.tasks_in_public_subnets
+    assign_public_ip = local.platform.tasks_in_public_subnets
   }
 
   load_balancer {
@@ -162,9 +169,24 @@ resource "aws_lb_target_group" "main" {
   tags = { Name = local.name }
 }
 
+# One rule per five paths, on EACH listener.
+#
+# An ALB rule accepts at most five condition values, so the paths are chunked.
+# And a rule belongs to one listener: 443 serves a browser that reaches the
+# ALB directly, 80 serves CloudFront, and a rule on one does nothing for the
+# other. Priorities are per-listener, so the same numbers are reused on both.
 resource "aws_lb_listener_rule" "main" {
-  listener_arn = local.platform.alb_https_listener_arn
-  priority     = var.listener_priority
+  for_each = {
+    for pair in setproduct(keys(local.platform.alb_listener_arns), range(length(chunklist(var.path_patterns, 5)))) :
+    "${pair[0]}-${pair[1]}" => {
+      listener = local.platform.alb_listener_arns[pair[0]]
+      index    = pair[1]
+      values   = chunklist(var.path_patterns, 5)[pair[1]]
+    }
+  }
+
+  listener_arn = each.value.listener
+  priority     = var.listener_priority + each.value.index
 
   action {
     type             = "forward"
@@ -173,11 +195,37 @@ resource "aws_lb_listener_rule" "main" {
 
   condition {
     path_pattern {
-      values = var.path_patterns
+      values = each.value.values
     }
   }
 
-  tags = { Name = local.name }
+  tags = { Name = "${local.name}-${each.key}" }
+}
+
+# The service's own public name: authentication-api.karlo.id and so on.
+#
+# A host-header rule on the HTTPS listener, so a request arriving under this
+# name reaches this service whatever its path — including one that names a
+# path another service owns, which then 404s here rather than being answered
+# by a service the caller did not address. Evaluated BEFORE the path rules
+# (lower number) for exactly that reason. Only on 443: CloudFront arrives on
+# 80 under the console's name, where the path rules are the right ones.
+resource "aws_lb_listener_rule" "host" {
+  listener_arn = local.platform.alb_listener_arns.https
+  priority     = var.listener_priority - 50
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.main.arn
+  }
+
+  condition {
+    host_header {
+      values = [local.platform.api_hostnames[var.service_name]]
+    }
+  }
+
+  tags = { Name = "${local.name}-host" }
 }
 
 # --- Service discovery ------------------------------------------------------

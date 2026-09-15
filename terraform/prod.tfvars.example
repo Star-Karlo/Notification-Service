@@ -13,7 +13,6 @@ environment = "prod"
 #           chokepoint you can watch.
 #
 # false is the safe default. Set true deliberately, knowing the trade.
-tasks_in_public_subnets = false
 cors_allowed_origins = ["https://tms.karlo.id"]
 fluentd_host         = "fluentd.karlo.internal"
 
@@ -34,21 +33,5 @@ extra_environment = [
   { name = "OTP_RESEND_COOLDOWN", value = "60s" },
 ]
 
-secrets = [
-  { name = "MONGO_URI", valueFrom = "SECRET_DOCDB:uri::" },
-  { name = "JWT_PUBLIC_KEY", valueFrom = "SECRET_JWT_PUBLIC" },
-  { name = "SERVICE_TOKEN", valueFrom = "SECRET_TOKENS:notification-service::" },
-  { name = "ACCEPTED_SERVICE_TOKENS", valueFrom = "SECRET_TOKENS:all::" },
-  # Delivery channels. Each is off until configured, and /health reports which
-  # are live.
-  { name = "FCM_CREDENTIALS_JSON", valueFrom = "SECRET_FCM" },
-  { name = "SMTP_PASSWORD", valueFrom = "SECRET_SMTP" },
-  { name = "WHATSAPP_TOKEN", valueFrom = "SECRET_WHATSAPP:token::" },
-  { name = "WHATSAPP_VERIFY_TOKEN", valueFrom = "SECRET_WHATSAPP:verify::" },
-]
-
-secret_arns = ["SECRET_DOCDB", "SECRET_JWT_PUBLIC", "SECRET_TOKENS", "SECRET_FCM", "SECRET_SMTP", "SECRET_WHATSAPP"]
-
-# The SECRET_* placeholders are Secrets Manager ARNs from platform-terraform's
-# `secret_arns` output. Copy this file to prod.tfvars and substitute them; the
-# copy is gitignored because the ARNs name where production credentials live.
+# Secrets are resolved from the platform's remote state in locals.tf; nothing
+# to paste here.

@@ -87,17 +87,22 @@ var registry = map[notificationv1.EventType]Template{
 		},
 		Params: []string{"orderNumber"},
 	},
+	// Drivers are master data and usually have no login, so the channel that
+	// reaches them is WhatsApp to the phone on their record; in-app and push
+	// apply to the minority who do sign in. The Meta template must exist
+	// under this name with three body parameters, in that order.
 	notificationv1.EventType_EVENT_TYPE_ORDER_ASSIGNED_DRIVER: {
-		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush, models.ChannelWhatsApp},
 		Title: map[string]string{
 			"id": "Tugas pengiriman baru",
 			"en": "New delivery assignment",
 		},
 		Body: map[string]string{
-			"id": "Anda ditugaskan untuk order %s.",
-			"en": "You have been assigned to order %s.",
+			"id": "Anda ditugaskan untuk order %s: %s → %s.",
+			"en": "You have been assigned to order %s: %s → %s.",
 		},
-		Params: []string{"orderNumber"},
+		WhatsAppTemplate: "order_assigned_driver",
+		Params:           []string{"orderNumber", "origin", "destination"},
 	},
 	// The legacy Notification model documented this as "request delivery order
 	// = request order to driver": the 3PL flow where a manager offers work to a

@@ -53,11 +53,6 @@ variable "min_capacity" {
   default = 1
 }
 
-variable "tasks_in_public_subnets" {
-  description = "Must match the platform's setting of the same name."
-  type        = bool
-  default     = false
-}
 
 variable "max_capacity" {
   type    = number
@@ -125,8 +120,12 @@ variable "path_patterns" {
   # and everything under it. The second REQUIRES the slash — the bare path,
   # which is every list call, fell through to the frontend's catch-all and
   # came back as an HTML 404.
-  type        = list(string)
-  default     = ["/api/v1/notifications*", "/api/v1/otp*", "/api/v1/webhooks*"]
+  # These must match the Vite dev proxy in karlo_platform/vite.config.ts. A path
+  # present in only one of the two works locally and 404s behind the load
+  # balancer, or the reverse — and neither failure appears until the environment
+  # the path is missing from is exercised.
+  type    = list(string)
+  default = ["/api/v1/notifications*", "/api/v1/otp*", "/api/v1/webhooks*"]
 }
 
 variable "cors_allowed_origins" {
@@ -146,14 +145,4 @@ variable "extra_environment" {
   default     = []
 }
 
-variable "secrets" {
-  description = "Secrets injected by the ECS agent at task start."
-  type        = list(object({ name = string, valueFrom = string }))
-  default     = []
-}
 
-variable "secret_arns" {
-  description = "The secrets the execution role may read. Enumerated, never wildcarded."
-  type        = list(string)
-  default     = []
-}
