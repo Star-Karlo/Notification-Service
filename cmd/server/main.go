@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -93,6 +94,12 @@ func run() error {
 	cancelIndex()
 	if err != nil {
 		return err
+	}
+
+	// `server archive [--dry-run]`: cold storage for notifications and
+	// conversations, run nightly as a one-off task. See internal/archive.
+	if slices.Contains(os.Args[1:], "archive") {
+		return runArchive(cfg, db, slices.Contains(os.Args[1:], "--dry-run"))
 	}
 
 	authClient, err := clients.NewAuth(cfg.AuthGRPCAddr, "notification", cfg.ServiceToken)

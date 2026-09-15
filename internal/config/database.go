@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -87,8 +88,10 @@ func EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 		{Collection("notifications"), sparseUnique(bson.D{{Key: "idempotencyKey", Value: 1}})},
 
 		{Collection("otps"), plain(bson.D{{Key: "phoneNumber", Value: 1}, {Key: "purpose", Value: 1}, {Key: "createdAt", Value: -1}})},
-		// Codes are useless once expired; keep them a day for support queries.
-		{Collection("otps"), ttl("expiresAt", 24*time.Hour)},
+		// Codes are useless once expired; a week covers "I never got my
+		// code" support queries. Deleted, never archived: an expired OTP
+		// has no evidentiary value and its hash is still a secret.
+		{Collection("otps"), ttl("expiresAt", 7*24*time.Hour)},
 
 		{Collection("inbound_messages"), sparseUnique(bson.D{{Key: "provider", Value: 1}, {Key: "providerId", Value: 1}})},
 		{Collection("inbound_messages"), plain(bson.D{{Key: "processed", Value: 1}, {Key: "receivedAt", Value: 1}})},
@@ -105,9 +108,30 @@ func EnsureIndexes(ctx context.Context, db *mongo.Database) error {
 	}
 
 	for _, spec := range specs {
-		if _, err := db.Collection(spec.collection).Indexes().CreateOne(ctx, spec.model); err != nil {
-			return fmt.Errorf("config: create index on %s: %w", spec.collection, err)
+		_, err := db.Collection(spec.collection).Indexes().CreateOne(ctx, spec.model)
+		if err == nil {
+			continue
 		}
+		// A TTL whose window changed: the index exists with the same keys and
+		// a different expireAfterSeconds, which CreateOne refuses (code 85,
+		// IndexOptionsConflict). collMod changes the window in place — the
+		// only index option Mongo allows to be altered without a rebuild.
+		var cmdErr mongo.CommandError
+		if errors.As(err, &cmdErr) && cmdErr.Code == 85 && spec.model.Options != nil && spec.model.Options.ExpireAfterSeconds != nil {
+			res := db.RunCommand(ctx, bson.D{
+				{Key: "collMod", Value: spec.collection},
+				{Key: "index", Value: bson.D{
+					{Key: "keyPattern", Value: spec.model.Keys},
+					{Key: "expireAfterSeconds", Value: *spec.model.Options.ExpireAfterSeconds},
+				}},
+			})
+			if res.Err() == nil {
+				slog.Info("ttl index window updated", "collection", spec.collection)
+				continue
+			}
+			err = res.Err()
+		}
+		return fmt.Errorf("config: create index on %s: %w", spec.collection, err)
 	}
 
 	slog.Info("mongodb indexes ensured", "count", len(specs))

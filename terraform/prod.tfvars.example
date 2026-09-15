@@ -31,6 +31,9 @@ extra_environment = [
   { name = "OTP_TTL", value = "5m" },
   { name = "OTP_MAX_ATTEMPTS", value = "5" },
   { name = "OTP_RESEND_COOLDOWN", value = "60s" },
+  # Cold storage: notifications and conversations older than this move to
+  # S3 as Parquet (Go duration; 720h = 30 days). OTPs expire by TTL index.
+  { name = "ARCHIVE_RETAIN", value = "720h" },
 ]
 
 # Secrets are resolved from the platform's remote state in locals.tf; nothing

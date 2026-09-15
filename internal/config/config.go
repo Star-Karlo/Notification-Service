@@ -22,6 +22,14 @@ type Config struct {
 	MongoDatabase string
 	MongoTimeout  time.Duration
 
+	// Cold storage (see internal/archive): notifications and conversations
+	// older than ArchiveRetain move to S3 as Parquet. Needs ArchiveBucket.
+	ArchiveBucket string
+	ArchiveRegion string
+	ArchivePrefix string
+	ArchiveRetain time.Duration
+	ArchiveBatch  int
+
 	ServiceToken          string
 	AcceptedServiceTokens []string
 
@@ -91,6 +99,11 @@ func Load() (*Config, error) {
 		HTTPPort:           envOr("HTTP_PORT", "5004"),
 		GRPCPort:           envOr("GRPC_PORT", "6004"),
 		MongoDatabase:      envOr("MONGO_DATABASE", "karlo_notification"),
+		ArchiveBucket:      envOr("ARCHIVE_BUCKET", ""),
+		ArchiveRegion:      envOr("ARCHIVE_REGION", envOr("AWS_REGION", "ap-southeast-3")),
+		ArchivePrefix:      envOr("ARCHIVE_PREFIX", "archive/notification"),
+		ArchiveRetain:      durationOr("ARCHIVE_RETAIN", 30*24*time.Hour),
+		ArchiveBatch:       intOr("ARCHIVE_BATCH", 100000),
 		MongoTimeout:       durationOr("MONGO_TIMEOUT", 10*time.Second),
 		AuthGRPCAddr:       envOr("AUTH_GRPC_ADDR", "localhost:6001"),
 		CORSAllowedOrigins: splitOr("CORS_ALLOWED_ORIGINS", nil),
