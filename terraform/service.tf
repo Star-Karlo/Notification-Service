@@ -210,7 +210,13 @@ resource "aws_lb_listener_rule" "main" {
 # by a service the caller did not address. Evaluated BEFORE the path rules
 # (lower number) for exactly that reason. Only on 443: CloudFront arrives on
 # 80 under the console's name, where the path rules are the right ones.
+#
+# Only for services the platform gives a public name. This one has none: it
+# is reached through the console's origin (tms.karlo.id/api/v1/...), which
+# is also where WhatsApp's webhook callbacks arrive.
 resource "aws_lb_listener_rule" "host" {
+  count = contains(keys(local.platform.api_hostnames), var.service_name) ? 1 : 0
+
   listener_arn = local.platform.alb_listener_arns.https
   priority     = var.listener_priority - 50
 
