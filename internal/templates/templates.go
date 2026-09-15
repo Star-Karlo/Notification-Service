@@ -348,6 +348,10 @@ type Rendered struct {
 	// Data is the flattened parameter set, passed to push as the deep-link
 	// payload and to WhatsApp as template parameters.
 	Data map[string]string
+	// Params is the same set in the template's declared order, which is the
+	// order the provider-side WhatsApp template expects its {{n}} slots
+	// filled. A map cannot carry that.
+	Params []string
 }
 
 // ErrUnknownEvent is returned for an event with no template.
@@ -385,6 +389,7 @@ func Render(event notificationv1.EventType, language string, params map[string]i
 
 	values := make([]interface{}, 0, len(tmpl.Params))
 	data := make(map[string]string, len(tmpl.Params))
+	ordered := make([]string, 0, len(tmpl.Params))
 	for _, name := range tmpl.Params {
 		raw, present := params[name]
 		if !present {
@@ -393,6 +398,7 @@ func Render(event notificationv1.EventType, language string, params map[string]i
 		s := stringify(raw)
 		values = append(values, s)
 		data[name] = s
+		ordered = append(ordered, s)
 	}
 
 	titleFormat := pick(tmpl.Title, lang)
@@ -413,6 +419,7 @@ func Render(event notificationv1.EventType, language string, params map[string]i
 		Channels:         tmpl.Channels,
 		WhatsAppTemplate: tmpl.WhatsAppTemplate,
 		Data:             data,
+		Params:           ordered,
 	}, nil
 }
 

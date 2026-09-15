@@ -409,6 +409,7 @@ func messagesFor(ch models.Channel, t clients.Target, copy *templates.Rendered) 
 		Title:    copy.Title,
 		Body:     copy.Body,
 		Data:     copy.Data,
+		Params:   copy.Params,
 		Language: t.Language,
 	}
 

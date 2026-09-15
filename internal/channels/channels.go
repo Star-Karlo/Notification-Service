@@ -27,6 +27,9 @@ type Message struct {
 	// Data carries the deep-link payload for push, and template parameters for
 	// email and WhatsApp.
 	Data map[string]string
+	// Params are the template parameters in declared order, for WhatsApp,
+	// whose templates are positional.
+	Params []string
 	// Template names a provider-side template. WhatsApp requires one for
 	// business-initiated messages; email uses it to select a layout.
 	Template string

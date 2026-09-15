@@ -67,7 +67,7 @@ func (w *WhatsApp) Send(ctx context.Context, msg Message) error {
 			"components": []map[string]interface{}{
 				{
 					"type":       "body",
-					"parameters": templateParameters(msg.Data),
+					"parameters": templateParameters(msg.Params),
 				},
 			},
 		},
@@ -116,21 +116,14 @@ func (w *WhatsApp) Send(ctx context.Context, msg Message) error {
 //
 // The map is ordered by key so the same data always produces the same parameter
 // order; a map's iteration order would otherwise scramble the placeholders.
-func templateParameters(data map[string]string) []map[string]string {
-	keys := make([]string, 0, len(data))
-	for k := range data {
-		keys = append(keys, k)
-	}
-	// Simple insertion sort: these maps hold a handful of entries.
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-
-	out := make([]map[string]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, map[string]string{"type": "text", "text": data[k]})
+// templateParameters lays the values out positionally. Meta templates bind
+// {{1}}, {{2}}… by position, so the order is the template's declared order —
+// never a map's, which once sorted these alphabetically and swapped
+// origin and destination in a driver's assignment.
+func templateParameters(params []string) []map[string]string {
+	out := make([]map[string]string, 0, len(params))
+	for _, v := range params {
+		out = append(out, map[string]string{"type": "text", "text": v})
 	}
 	return out
 }
