@@ -77,7 +77,7 @@ type target struct {
 func (a *Archiver) targets() []target {
 	return []target{
 		{collection: config.Collection("notifications"), timeField: "createdAt"},
-		{collection: config.Collection("messages"), timeField: "createdAt"},
+		{collection: config.Collection("messages"), timeField: "sentAt"},
 		{collection: config.Collection("inbound_messages"), timeField: "receivedAt"},
 		// Tickets leave once closed and cold; their events go with them,
 		// selected by ticket rather than by their own age so a ticket's
