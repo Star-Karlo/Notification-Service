@@ -337,6 +337,22 @@ var registry = map[notificationv1.EventType]Template{
 		WhatsAppTemplate: "otp_verification",
 		Params:           []string{"code", "minutes"},
 	},
+	// A planner registered the driver's K-Trip account. WhatsApp only: the
+	// driver has no inbox until they sign in, which is what this message
+	// makes possible. Meta template with four body parameters, in this order.
+	notificationv1.EventType_EVENT_TYPE_DRIVER_ACCOUNT_CREATED: {
+		Channels: []models.Channel{models.ChannelWhatsApp},
+		Title: map[string]string{
+			"id": "Akun K-Trip Anda",
+			"en": "Your K-Trip account",
+		},
+		Body: map[string]string{
+			"id": "%s mendaftarkan Anda sebagai driver. Unduh K-Trip di %s, lalu masuk dengan username %s dan password %s.",
+			"en": "%s registered you as a driver. Download K-Trip at %s, then sign in with username %s and password %s.",
+		},
+		WhatsAppTemplate: "driver_account_created",
+		Params:           []string{"companyName", "appLink", "username", "password"},
+	},
 }
 
 // Rendered is the finished copy for one recipient.
