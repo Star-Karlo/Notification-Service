@@ -17,6 +17,9 @@ locals {
     { name = "WHATSAPP_TOKEN", valueFrom = "${local.platform.secret_arns.integrations}:whatsapp_token::" },
     { name = "WHATSAPP_PHONE_NUMBER_ID", valueFrom = "${local.platform.secret_arns.integrations}:whatsapp_phone_number_id::" },
     { name = "WHATSAPP_VERIFY_TOKEN", valueFrom = "${local.platform.secret_arns.integrations}:whatsapp_verify_token::" },
+    # The second WABA number (chatbot + live chat), still served by the
+    # communication service; its webhook events are forwarded there.
+    { name = "WHATSAPP_SUPPORT_PHONE_NUMBER_ID", valueFrom = "${local.platform.secret_arns.integrations}:whatsapp_support_phone_number_id::" },
   ]
 
   secret_arns = [

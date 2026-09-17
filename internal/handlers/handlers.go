@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -271,6 +272,23 @@ func (h *WebhookHandler) Receive(c *gin.Context) {
 		// Meta retries on a non-2xx, and a body this service cannot parse will
 		// not become parseable on retry. Acknowledge and record nothing.
 		c.JSON(http.StatusOK, gin.H{"status": "ignored"})
+		return
+	}
+
+	// Events for the support number belong to the communication service
+	// (chatbot, live chat). Forward them as they came and record nothing:
+	// storing them here too would leave every customer message in two
+	// places, and only one of them answers.
+	if h.cfg.WhatsApp.SupportPhoneNumber != "" && h.cfg.WhatsApp.SupportWebhookURL != "" &&
+		payloadIsForPhoneNumber(payload, h.cfg.WhatsApp.SupportPhoneNumber) {
+		if err := forwardWebhook(c.Request.Context(), h.cfg.WhatsApp.SupportWebhookURL, payload); err != nil {
+			// Non-2xx makes Meta redeliver, which is the right call for a
+			// forward that failed: the chatbot never saw the message.
+			slog.WarnContext(c.Request.Context(), "support webhook not forwarded", "error", err)
+			response.InternalError(c, "Failed to forward the message")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "forwarded"})
 		return
 	}
 

@@ -77,6 +77,15 @@ type WhatsApp struct {
 	VerifyToken string
 	APIVersion  string
 	Enabled     bool
+
+	// Two numbers under one WABA app, as the legacy communication service
+	// had them: PhoneNumber (number A) sends OTPs and order/driver messages
+	// from here; SupportPhoneNumber (number B) is the chatbot and live-chat
+	// number the communication service still runs. Meta delivers one
+	// webhook per app, so events for B arrive here and are forwarded to
+	// SupportWebhookURL untouched. Empty means there is no second number.
+	SupportPhoneNumber string
+	SupportWebhookURL  string
 }
 
 type OTP struct {
@@ -128,6 +137,9 @@ func Load() (*Config, error) {
 			PhoneNumber: os.Getenv("WHATSAPP_PHONE_NUMBER_ID"),
 			VerifyToken: os.Getenv("WHATSAPP_VERIFY_TOKEN"),
 			APIVersion:  envOr("WHATSAPP_API_VERSION", "v21.0"),
+
+			SupportPhoneNumber: os.Getenv("WHATSAPP_SUPPORT_PHONE_NUMBER_ID"),
+			SupportWebhookURL:  os.Getenv("WHATSAPP_SUPPORT_WEBHOOK_URL"),
 		},
 		OTP: OTP{
 			Length:         intOr("OTP_LENGTH", 6),
