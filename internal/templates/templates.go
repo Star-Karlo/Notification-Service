@@ -353,6 +353,58 @@ var registry = map[notificationv1.EventType]Template{
 		WhatsAppTemplate: "driver_account_created",
 		Params:           []string{"companyName", "appLink", "username", "password"},
 	},
+	// The unloading handover: the receiving PIC gets the driver's code and
+	// the Web-Field link where they verify the cargo. Meta template with
+	// three body parameters, in this order.
+	notificationv1.EventType_EVENT_TYPE_HANDOVER_CODE: {
+		Channels: []models.Channel{models.ChannelWhatsApp},
+		Title: map[string]string{
+			"id": "Kode bongkar",
+			"en": "Unloading code",
+		},
+		Body: map[string]string{
+			"id": "Kode bongkar untuk order %s adalah %s (berlaku %s menit). Verifikasi muatan di %s.",
+			"en": "The unloading code for order %s is %s (valid %s minutes). Verify the cargo at %s.",
+		},
+		WhatsAppTemplate: "handover_code",
+		Params:           []string{"orderNumber", "code", "minutes", "fieldUrl"},
+	},
+	notificationv1.EventType_EVENT_TYPE_POD_SUBMITTED: {
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Title: map[string]string{
+			"id": "POD menunggu verifikasi",
+			"en": "POD awaiting review",
+		},
+		Body: map[string]string{
+			"id": "Driver mengirim foto POD %s untuk order %s. Periksa dan setujui atau tolak.",
+			"en": "The driver submitted the %s POD for order %s. Review and approve or reject it.",
+		},
+		Params: []string{"stageLabel", "orderNumber"},
+	},
+	notificationv1.EventType_EVENT_TYPE_POD_APPROVED: {
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Title: map[string]string{
+			"id": "POD disetujui",
+			"en": "POD approved",
+		},
+		Body: map[string]string{
+			"id": "POD %s order %s disetujui. Silakan lanjutkan.",
+			"en": "The %s POD for order %s was approved. Carry on.",
+		},
+		Params: []string{"stageLabel", "orderNumber"},
+	},
+	notificationv1.EventType_EVENT_TYPE_POD_REJECTED: {
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Title: map[string]string{
+			"id": "POD ditolak",
+			"en": "POD rejected",
+		},
+		Body: map[string]string{
+			"id": "POD %s order %s ditolak: %s. Unggah ulang foto.",
+			"en": "The %s POD for order %s was rejected: %s. Upload the photos again.",
+		},
+		Params: []string{"stageLabel", "orderNumber", "reason"},
+	},
 }
 
 // Rendered is the finished copy for one recipient.
