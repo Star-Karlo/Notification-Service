@@ -356,18 +356,62 @@ var registry = map[notificationv1.EventType]Template{
 	// The unloading handover: the receiving PIC gets the driver's code and
 	// the Web-Field link where they verify the cargo. Meta template with
 	// three body parameters, in this order.
+	// The code now goes to the DRIVER, not to the PIC: the driver enters it in
+	// K-Trip to start unloading and reads it out to the PIC, who enters the
+	// same code on Web-Field to open the audit. Possession of the code is
+	// therefore proof that the two people are standing together at the gate,
+	// which a code mailed only to the warehouse never showed.
 	notificationv1.EventType_EVENT_TYPE_HANDOVER_CODE: {
-		Channels: []models.Channel{models.ChannelWhatsApp},
+		Channels: []models.Channel{models.ChannelWhatsApp, models.ChannelPush, models.ChannelInApp},
 		Title: map[string]string{
 			"id": "Kode bongkar",
 			"en": "Unloading code",
 		},
 		Body: map[string]string{
-			"id": "Kode bongkar untuk order %s adalah %s (berlaku %s menit). Verifikasi muatan di %s.",
-			"en": "The unloading code for order %s is %s (valid %s minutes). Verify the cargo at %s.",
+			"id": "Kode bongkar untuk order %s adalah %s (berlaku %s menit). Masukkan di K-Trip, lalu bacakan ke PIC gudang untuk verifikasi muatan di %s.",
+			"en": "The unloading code for order %s is %s (valid %s minutes). Enter it in K-Trip, then read it out to the warehouse PIC who verifies the cargo at %s.",
 		},
 		WhatsAppTemplate: "handover_code",
 		Params:           []string{"orderNumber", "code", "minutes", "fieldUrl"},
+	},
+	// Web-Field. The PIC is told a truck is at the gate and never told the
+	// code — the driver carries that, and asking for it is what proves the
+	// driver is present.
+	notificationv1.EventType_EVENT_TYPE_FIELD_VERIFICATION_PENDING: {
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Title: map[string]string{
+			"id": "Verifikasi muatan menunggu",
+			"en": "Cargo verification waiting",
+		},
+		Body: map[string]string{
+			"id": "Truk %s tiba di %s untuk order %s. Minta Kode OTP ke pengemudi, lalu verifikasi muatan di %s.",
+			"en": "Truck %s has arrived at %s for order %s. Ask the driver for the OTP, then verify the cargo at %s.",
+		},
+		Params: []string{"truck", "warehouse", "orderNumber", "fieldUrl"},
+	},
+	notificationv1.EventType_EVENT_TYPE_FIELD_AUDIT_RECORDED: {
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Title: map[string]string{
+			"id": "Hasil audit muatan",
+			"en": "Cargo audit result",
+		},
+		Body: map[string]string{
+			"id": "%s menyatakan muatan order %s %s.",
+			"en": "%s reported the cargo on order %s as %s.",
+		},
+		Params: []string{"picName", "orderNumber", "result"},
+	},
+	notificationv1.EventType_EVENT_TYPE_FIELD_MANIFEST_FINALIZED: {
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Title: map[string]string{
+			"id": "Manifest difinalisasi",
+			"en": "Manifest finalised",
+		},
+		Body: map[string]string{
+			"id": "Manifest order %s difinalisasi oleh %s di lokasi bongkar. Data bongkar tidak dapat diubah lagi.",
+			"en": "The manifest for order %s was finalised by %s at the unloading point. The figures can no longer be changed.",
+		},
+		Params: []string{"orderNumber", "picName"},
 	},
 	notificationv1.EventType_EVENT_TYPE_POD_SUBMITTED: {
 		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
