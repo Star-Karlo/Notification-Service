@@ -377,17 +377,22 @@ var registry = map[notificationv1.EventType]Template{
 	// Web-Field. The PIC is told a truck is at the gate and never told the
 	// code — the driver carries that, and asking for it is what proves the
 	// driver is present.
+	// The link carries the order number and the code, so the PIC taps it and
+	// lands on the audit with nothing to type. WhatsApp is the channel that
+	// matters here: the person at the gate usually has no console account,
+	// which is also why this goes to a bare number as well as to users.
 	notificationv1.EventType_EVENT_TYPE_FIELD_VERIFICATION_PENDING: {
-		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
+		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush, models.ChannelWhatsApp},
 		Title: map[string]string{
 			"id": "Verifikasi muatan menunggu",
 			"en": "Cargo verification waiting",
 		},
 		Body: map[string]string{
-			"id": "Truk %s tiba di %s untuk order %s. Minta Kode OTP ke pengemudi, lalu verifikasi muatan di %s.",
-			"en": "Truck %s has arrived at %s for order %s. Ask the driver for the OTP, then verify the cargo at %s.",
+			"id": "Armada %s telah tiba di gudang %s untuk order %s. Mohon periksa rincian item dan verifikasi kesesuaian muatan melalui tautan berikut: %s. Verifikasi ini wajib dilakukan agar driver dapat mengunggah POD bongkar.",
+			"en": "Truck %s has arrived at %s for order %s. Please check the items and confirm the cargo at %s. The driver cannot upload the unloading POD until you have.",
 		},
-		Params: []string{"truck", "warehouse", "orderNumber", "fieldUrl"},
+		WhatsAppTemplate: "field_verification",
+		Params:           []string{"truck", "warehouse", "orderNumber", "fieldUrl"},
 	},
 	notificationv1.EventType_EVENT_TYPE_FIELD_AUDIT_RECORDED: {
 		Channels: []models.Channel{models.ChannelInApp, models.ChannelPush},
