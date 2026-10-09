@@ -1,0 +1,172 @@
+version: 0.2
+
+# Build, migrate, roll — the whole deploy, in region.
+#
+# This is what .github/workflows/deploy.yml used to do. It moved here so the
+# deploy runs inside ap-southeast-3 rather than on GitHub's runners; see the
+# comment at the top of terraform/deploy.tf for why it is CodeBuild rather
+# than CodePipeline.
+#
+# Nothing is configured in this file. Every name comes from the project
+# environment in terraform/deploy.tf, which reads it from the same locals that
+# registered the task definition and created the ECR repository — so renaming a
+# service cannot leave the deploy pointing at the old name. The workflow this
+# replaces hardcoded TASK_FAMILY with a comment apologising for it.
+#
+# Supplied by the project environment:
+#   ECS_CLUSTER  SERVICE_NAME  CONTAINER_NAME  TASK_FAMILY
+#   ECR_REPOSITORY_URL  ECR_REPOSITORY_NAME
+#   RUN_MIGRATIONS  TEST_IMAGE  TEST_COMMAND
+
+# Every command below opens with `set -euo pipefail`, and `pipefail` is a bash
+# builtin. The default shell is not documented, so it is pinned rather than
+# assumed: under dash, `set -o pipefail` fails and the build dies on its first
+# line.
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    # Without this CodeBuild would run post_build — the phase that rolls
+    # production — after a failed build.
+    on-failure: ABORT
+    commands:
+      # The gate the old workflow got from `on: workflow_run: [CI]`. A webhook
+      # fires on the push itself, so there is no completed CI run to wait for
+      # and the gate has to live here instead: a red unit test must not reach
+      # production.
+      #
+      # This is the fast gate only. The full suite — lint, integration tests,
+      # proto breaking-change detection, OpenAPI drift — still runs on GitHub
+      # Actions, which can also report on pull requests. No AWS deploy trigger
+      # does that, so CI stays where it is.
+      #
+      # Run inside the project's own toolchain image, not on the CodeBuild
+      # host: the version that compiles the tests is then the version the
+      # Dockerfile builds with, rather than whatever the managed image ships.
+      - |
+        set -euo pipefail
+        echo "--- unit gate in $TEST_IMAGE"
+        # `sh -c`, never `sh -lc`: a login shell re-reads /etc/profile and
+        # resets PATH, which drops /usr/local/go/bin and leaves the gate
+        # reporting `go: not found`.
+        docker run --rm -v "$PWD":/src -w /src "$TEST_IMAGE" sh -c "$TEST_COMMAND"
+
+      - |
+        set -euo pipefail
+        echo "--- ECR login"
+        aws ecr get-login-password --region "$AWS_REGION" \
+          | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%%/*}"
+
+  build:
+    on-failure: ABORT
+    commands:
+      - |
+        set -euo pipefail
+        SHA="$CODEBUILD_RESOLVED_SOURCE_VERSION"
+        TAG="sha-${SHA:0:12}"
+        IMAGE="$ECR_REPOSITORY_URL:$TAG"
+
+        # Tagged by commit, never "latest": a tag must always mean the same
+        # image, or a rollback cannot name what to roll back to. The repository
+        # is IMMUTABLE for the same reason — so a redeploy of a commit already
+        # built (a rollback, or a restart to pick up a config change) has to
+        # reuse its image rather than fail trying to overwrite it. The same
+        # commit is the same image.
+        #
+        # batch-get-image rather than describe-images: it is the read this role
+        # already holds for pulling, and a denied describe looked like "not
+        # built" and tried to overwrite the immutable tag.
+        if aws ecr batch-get-image --repository-name "$ECR_REPOSITORY_NAME" \
+             --image-ids imageTag="$TAG" \
+             --query 'images[0].imageId.imageDigest' --output text 2>/dev/null | grep -q sha256; then
+          echo "already in ECR, reusing: $IMAGE"
+        else
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+        fi
+
+        # Phases get their own shell, so the image name is handed on in a file.
+        echo "$IMAGE" > /tmp/image
+
+  post_build:
+    commands:
+      - |
+        set -euo pipefail
+        IMAGE="$(cat /tmp/image)"
+        echo "--- registering a task definition for $IMAGE"
+
+        # The task definition is owned by Terraform, which ignores changes to
+        # its container definitions precisely so this step can move the image
+        # without the next apply moving it back.
+        aws ecs describe-task-definition --task-definition "$TASK_FAMILY" \
+          --query taskDefinition > /tmp/task-def.json
+
+        # Swap the image, and drop the fields describe returns but register
+        # refuses. This is the one thing the GitHub action did that has no CLI
+        # equivalent, so it is spelled out.
+        jq --arg image "$IMAGE" --arg name "$CONTAINER_NAME" '
+            .containerDefinitions |= map(if .name == $name then .image = $image else . end)
+          | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+        ' /tmp/task-def.json > /tmp/new-task-def.json
+
+        # A CONTAINER_NAME matching nothing would register the OLD image under
+        # a new revision and report success: the deploy would go green and
+        # change nothing. Check rather than trust.
+        jq -e --arg image "$IMAGE" 'any(.containerDefinitions[]; .image == $image)' \
+          /tmp/new-task-def.json > /dev/null \
+          || { echo "no container named '$CONTAINER_NAME' in $TASK_FAMILY"; exit 1; }
+
+        ARN="$(aws ecs register-task-definition \
+                 --cli-input-json file:///tmp/new-task-def.json \
+                 --query 'taskDefinition.taskDefinitionArn' --output text)"
+        echo "$ARN" > /tmp/taskdef-arn
+        echo "registered $ARN"
+
+      - |
+        set -euo pipefail
+        [ "$RUN_MIGRATIONS" = "true" ] || { echo "--- no migrations for this service"; exit 0; }
+
+        ARN="$(cat /tmp/taskdef-arn)"
+        echo "--- migrating"
+
+        # Migrate BEFORE rolling the service, as a one-off task inside the VPC
+        # with the service's own secrets — the only place RDS is reachable
+        # from. On a fresh environment it also creates the database. A failed
+        # migration stops the deploy here, so the running service never sees a
+        # schema its code was not built for.
+        #
+        # The override is ["migrate"], not ["server","migrate"]: the image's
+        # ENTRYPOINT is already the binary, and ECS appends the override to it.
+        # With the binary named twice, os.Args[1] was "server" and the
+        # migration branch was never taken — the task just started the service
+        # against a database that did not exist yet.
+        NET="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$SERVICE_NAME" \
+                 --query 'services[0].networkConfiguration.awsvpcConfiguration' --output json)"
+        TASK="$(aws ecs run-task --cluster "$ECS_CLUSTER" --launch-type FARGATE \
+                  --task-definition "$ARN" \
+                  --network-configuration "{\"awsvpcConfiguration\":$NET}" \
+                  --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"migrate\"]}]}" \
+                  --query 'tasks[0].taskArn' --output text)"
+        echo "migration task: $TASK"
+        aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK"
+
+        CODE="$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+                  --query 'tasks[0].containers[0].exitCode' --output text)"
+        REASON="$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+                    --query 'tasks[0].stoppedReason' --output text)"
+        echo "exit code: $CODE  ($REASON)"
+        [ "$CODE" = "0" ]
+
+      - |
+        set -euo pipefail
+        ARN="$(cat /tmp/taskdef-arn)"
+        echo "--- rolling $SERVICE_NAME"
+        aws ecs update-service --cluster "$ECS_CLUSTER" --service "$SERVICE_NAME" \
+          --task-definition "$ARN" --query 'service.serviceName' --output text
+
+        # Fails the build if the new tasks never become healthy, which is what
+        # makes a bad deploy visible on the commit rather than in a dashboard.
+        aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$SERVICE_NAME"
+        echo "deployed $(cat /tmp/image)"
