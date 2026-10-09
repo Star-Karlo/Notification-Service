@@ -26,6 +26,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project     = "karlo-tms"
+      Category    = "NOTIFICATION SERVICE"
       Service     = "notification-service"
       Environment = var.environment
       ManagedBy   = "terraform"
