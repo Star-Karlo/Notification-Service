@@ -338,9 +338,32 @@ resource "aws_codebuild_project" "deploy" {
   tags = { Name = "${local.name}-deploy" }
 }
 
+variable "enable_codebuild_webhook" {
+  description = <<-EOT
+    Register the GitHub push webhook on the CodeBuild project.
+
+    Off by default, and that default is load-bearing. CodeBuild registers the
+    webhook in GitHub using the account's stored credential, so without it
+    the create fails with "Access token not found in CodeBuild project for
+    server type github" — and because the webhook is the last resource in
+    this file, an apply gets all the way through the project and the IAM
+    policy before stopping. That turns a one-time setup step into an apply
+    that can never converge, in every repository.
+
+    So: apply with this off, which creates everything that does not need the
+    credential. Then import it once for the whole account (see the header),
+    set this to true, and apply again. The cutover finishes by deleting
+    .github/workflows/deploy.yml, not before.
+  EOT
+  type        = bool
+  default     = false
+}
+
 # Pushes to main, and nothing else. A pull request from a fork cannot reach
 # this: it is not a push to this repository's main.
 resource "aws_codebuild_webhook" "deploy" {
+  count = var.enable_codebuild_webhook ? 1 : 0
+
   project_name = aws_codebuild_project.deploy.name
   build_type   = "BUILD"
 
