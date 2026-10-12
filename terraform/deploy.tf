@@ -54,7 +54,7 @@ variable "run_migrations" {
 variable "deploy_test_image" {
   description = "Toolchain image the pre-deploy unit gate runs in. Pinned to the version the Dockerfile builds with."
   type        = string
-  default     = "golang:1.25-alpine"
+  default     = "golang:1.26-alpine"
 }
 
 variable "deploy_test_command" {

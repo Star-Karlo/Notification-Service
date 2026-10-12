@@ -2,7 +2,7 @@
 
 # This service is self-contained: the build context is this directory, and
 # there are no sibling modules to copy in.
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache ca-certificates git
 

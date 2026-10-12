@@ -7,7 +7,7 @@ on:
 
 # The floor is set by gin and grpc, which both require 1.25.
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
 
 jobs:
   build:
