@@ -2,10 +2,12 @@ package authctx
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // GinContextKey is where the principal is stored on a gin context, for handlers
@@ -70,6 +72,17 @@ func RequireAuthWithRevocations(v *Verifier, remote RemoteValidator, revoked Rev
 
 		principal, rerr := remote.ValidateToken(c.Request.Context(), token)
 		if rerr != nil {
+			// An EXPIRED token also lands here: local verification rejected
+			// it, so the remote is asked, and the remote rejects it too. Say
+			// so plainly. Blaming another device for an ordinary expiry sent
+			// a driver hunting for a phantom second phone and hid a real bug
+			// (K-Trip never refreshed, so every driver was thrown out
+			// mid-trip when the access token ran out).
+			if errors.Is(err, jwt.ErrTokenExpired) {
+				abort(c, "Sesi Anda sudah berakhir. Silakan login ulang. "+
+					"(Session expired.)")
+				return
+			}
 			// This is usually a single-device session that was DISPLACED —
 			// the same account signed in somewhere else and that eviction is
 			// immediate. "Please log in again" reads as expiry, which sends
